@@ -1,4 +1,5 @@
 import os
+import secrets
 
 # Load .env if present (very small loader, no extra dependency)
 _env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
@@ -9,7 +10,9 @@ if os.path.exists(_env_path):
             k, v = line.split("=", 1)
             os.environ.setdefault(k.strip(), v.strip())
 
-SECRET_KEY = os.getenv("SECRET_KEY", "ai-pulse-dev-secret")
+# No hard-coded fallback: if no secret is configured we generate a random one
+# per process, so a leaked/committed secret can never be used to forge tokens.
+SECRET_KEY = os.getenv("SECRET_KEY") or secrets.token_urlsafe(48)
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./aipulse.db")
 AI_MODE = os.getenv("AI_MODE", "mock")  # "mock" or "live"
 LLM_API_URL = os.getenv("LLM_API_URL", "")

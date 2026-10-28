@@ -4,15 +4,31 @@ import { api } from "../api.js";
 export default function Diagnostic({ onDone }) {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     api("/diagnostic/questions").then(setQuestions);
   }, []);
 
   async function submit() {
-    const payload = Object.entries(answers).map(([question_id, answer]) => ({ question_id, answer }));
-    await api("/diagnostic/submit", { method: "POST", body: JSON.stringify({ answers: payload }) });
-    onDone();
+    setError("");
+    setSaving(true);
+    try {
+      const payload = Object.entries(answers).map(([question_id, answer]) => ({ question_id, answer }));
+      await api("/diagnostic/submit", { method: "POST", body: JSON.stringify({ answers: payload }) });
+      onDone();
+    } catch (err) {
+      // 502 means the scoring model gave an unusable answer; anything else
+      // (e.g. a 400 validation message) is shown as the server sent it.
+      if (err.status === 502) {
+        setError("We could not score one of your answers just now. Please try again in a moment.");
+      } else {
+        setError(err.message || "Something went wrong. Please try again.");
+      }
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -31,7 +47,8 @@ export default function Diagnostic({ onDone }) {
           )}
         </div>
       ))}
-      <button onClick={submit}>Submit</button>
+      {error && <p className="error" role="alert">{error}</p>}
+      <button onClick={submit} disabled={saving}>{saving ? "Submitting…" : "Submit"}</button>
     </div>
   );
 }

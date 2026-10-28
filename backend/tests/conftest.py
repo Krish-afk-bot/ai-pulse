@@ -3,6 +3,9 @@ import pytest
 
 os.environ["DATABASE_URL"] = "sqlite:///./test.db"
 os.environ["AI_MODE"] = "mock"
+# Fixed test secret so tests never depend on a developer's local .env (and can
+# prove that the old committed secret no longer signs valid tokens).
+os.environ["SECRET_KEY"] = "test-secret-ai-pulse"
 
 from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
