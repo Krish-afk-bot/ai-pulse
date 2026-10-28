@@ -4,3 +4,5 @@ body { font-family: system-ui, sans-serif; margin: 0; background: #f6f7fb; color
 button { background: #3f2a71; color: #fff; border: 0; padding: 10px 16px; border-radius: 6px; cursor: pointer; }
 input, textarea, select { width: 100%; padding: 8px; margin: 6px 0 14px; box-sizing: border-box; }
 .error { color: #b42318; }
+.muted { color: #5b6472; }
+.evidence-list > li { margin-bottom: 12px; }

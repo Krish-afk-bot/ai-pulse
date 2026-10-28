@@ -5,15 +5,9 @@ from ..db import get_db
 from .. import models
 from ..auth import current_membership
 from ..utils import maturity_level
+from ..services.improvement import NEXT_STEPS, build_improvement_plan
 
 router = APIRouter(prefix="/reports", tags=["reports"])
-
-NEXT_STEPS = {
-    "support": ["Use AI to draft first replies, then edit", "Summarise long ticket threads before escalating", "Never paste customer details into public chatbots"],
-    "engineering": ["Use a code assistant for tests and refactors", "Review every AI suggestion before merging", "Keep secrets and customer data out of prompts"],
-    "sales": ["Draft outreach emails with AI and personalise them", "Summarise call notes into CRM updates", "Check AI-written claims before sending"],
-    "manager": ["Agree an AI usage policy with your team", "Pick one workflow per quarter to improve with AI", "Track time saved, not tool licences"],
-}
 
 
 @router.get("/me")
@@ -31,6 +25,17 @@ def my_report(m: models.Membership = Depends(current_membership), db: Session = 
         "risks": flags,
         "next_steps": NEXT_STEPS.get(m.job_role, NEXT_STEPS["manager"]),
     }
+
+
+@router.get("/me/improvement")
+def my_improvement_plan(m: models.Membership = Depends(current_membership), db: Session = Depends(get_db)):
+    """Evidence and next actions derived from this membership's own assessment.
+
+    Scoped to the authenticated membership in the selected organization; there
+    is no user or membership input, so one employee cannot read another's plan.
+    """
+    rows = db.query(models.Response).filter_by(membership_id=m.id).all()
+    return build_improvement_plan(m, rows)
 
 
 @router.delete("/me")
