@@ -24,6 +24,8 @@ def level_for(avg):
 def org_dashboard(org_id: int, m: models.Membership = Depends(current_membership), db: Session = Depends(get_db)):
     if m.role != "admin":
         raise HTTPException(403, "Admins only")
+    if org_id != m.org_id:
+        raise HTTPException(403, "Not authorized to access this organization")
 
     org = db.get(models.Organization, org_id)
     if not org:

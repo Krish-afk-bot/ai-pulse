@@ -24,6 +24,18 @@ def test_admin_dashboard(client):
 
 def test_admin_cannot_see_other_org(client):
     headers, _ = login(client, "asha@northwind.test", "Northwind Logistics")
-    r = client.get("/dashboard?org_id=1", headers=headers)
-    assert r.status_code == 200
-    assert "departments" in r.json()
+    _, bluepeak = login(client, "meera@bluepeak.test", "Bluepeak Retail")
+    other_org_id = bluepeak["organizations"][0]["org_id"]
+
+    r = client.get(f"/dashboard?org_id={other_org_id}", headers=headers)
+
+    assert r.status_code == 403
+
+
+def test_employee_cannot_access_admin_dashboard(client):
+    headers, data = login(client, "priya@northwind.test", "Northwind Logistics")
+    org_id = next(o["org_id"] for o in data["organizations"] if o["org_name"] == "Northwind Logistics")
+
+    r = client.get(f"/dashboard?org_id={org_id}", headers=headers)
+
+    assert r.status_code == 403
