@@ -6,3 +6,8 @@ input, textarea, select { width: 100%; padding: 8px; margin: 6px 0 14px; box-siz
 .error { color: #b42318; }
 .muted { color: #5b6472; }
 .evidence-list > li { margin-bottom: 12px; }
+.dashboard-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+.dashboard-table caption { text-align: left; font-weight: 600; margin-bottom: 8px; }
+.dashboard-table th, .dashboard-table td { text-align: left; padding: 8px; border-bottom: 1px solid #e4e7ee; }
+.dashboard-table thead th { border-bottom: 2px solid #d5d9e2; }
+.group-row { background: #f2effa; font-style: italic; }

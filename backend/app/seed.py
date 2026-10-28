@@ -5,6 +5,8 @@ All passwords are: pulse123
 from .db import Base, engine, SessionLocal
 from . import models
 from .auth import hash_password
+from .services.assessment import ALLOWED_RISK_FLAGS
+from .services.questions import questions_for
 
 PEOPLE_NORTHWIND = [
     # name, email, department, role, job_role, seniority
@@ -15,6 +17,8 @@ PEOPLE_NORTHWIND = [
     ("Priya Nair", "priya@northwind.test", "Support", "employee", "support", "junior"),
     ("Arjun Iyer", "arjun@northwind.test", "Support", "employee", "support", "senior"),
     ("Kavitha Menon", "kavitha@northwind.test", "Support", "employee", "support", "mid"),
+    ("Meghna Joshi", "meghna@northwind.test", "Support", "employee", "support", "junior"),
+    ("Farhan Ali", "farhan@northwind.test", "Support", "employee", "support", "mid"),
     ("Dev Malhotra", "dev@northwind.test", "Engineering", "employee", "engineering", "lead"),
     ("Sara Thomas", "sara@northwind.test", "Engineering", "employee", "engineering", "mid"),
     ("Imran Khan", "imran@northwind.test", "HR", "employee", "manager", "senior"),
@@ -27,7 +31,31 @@ PEOPLE_BLUEPEAK = [
 ]
 
 
-def run():
+def add_complete_assessment(db, membership, tendency, flags=()):
+    """Add one valid Response per question so completed_responses() accepts it.
+
+    ``tendency`` is 2-4: MCQs pick the option closest to it and open answers use it
+    as the score. It is deterministic, so each person gets a stable, different average.
+    """
+    risk_flags = [flag for flag in flags if flag in ALLOWED_RISK_FLAGS]
+    for question in questions_for(membership.job_role, membership.seniority):
+        is_open = question["type"] == "open"
+        if is_open:
+            answer, score = "Used AI on a real task and reviewed the output.", tendency
+        else:
+            option = min(question["options"], key=lambda item: abs(item["points"] - tendency))
+            answer, score = option["text"], option["points"]
+        db.add(models.Response(
+            membership_id=membership.id,
+            question_id=question["id"],
+            answer=answer,
+            score=score,
+            reason="Checked the AI output before using it." if is_open else None,
+            flags=risk_flags if is_open else [],
+        ))
+
+
+def run(with_demo=True):
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
@@ -83,6 +111,26 @@ def run():
     answer("tom@bluepeak.test", bp, "common-freq", "A few times a week", 3)
     answer("kabir@bluepeak.test", bp, "common-open", "Uploaded our full customer refund list to an AI tool to find patterns.", 3, "Good idea, unsafe data handling.", ["customer_data_shared", "confidential_data_shared"])
     answer("kabir@bluepeak.test", bp, "common-freq", "Daily", 4)
+
+    # Completed diagnostics, so the dashboard has real numbers. Priya and Vikram
+    # keep their partial answers on purpose, so Priya can finish hers in a demo.
+    def complete(email, org, tendency, flags=()):
+        member = db.query(models.Membership).filter_by(user_id=users[email].id, org_id=org.id).first()
+        add_complete_assessment(db, member, tendency, flags)
+
+    if with_demo:
+        complete("arjun@northwind.test", nw, 2, ["unreviewed_output"])
+        complete("kavitha@northwind.test", nw, 4, ["unreviewed_output"])
+        complete("meghna@northwind.test", nw, 3, ["unreviewed_output"])
+        complete("farhan@northwind.test", nw, 2, ["unreviewed_output", "customer_data_shared"])
+        complete("neha@northwind.test", nw, 4, ["customer_data_shared"])
+        complete("rohan@northwind.test", nw, 3, ["customer_data_shared"])
+        complete("dev@northwind.test", nw, 4, ["unreviewed_output"])
+        complete("sara@northwind.test", nw, 2)
+        complete("imran@northwind.test", nw, 3)
+        complete("ravi@consult.test", nw, 4)
+        complete("tom@bluepeak.test", bp, 3)
+        complete("lina@bluepeak.test", bp, 2)
 
     db.commit()
     db.close()
