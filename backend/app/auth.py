@@ -1,4 +1,6 @@
 import hashlib
+import hmac
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -10,12 +12,63 @@ from .db import get_db
 from . import models
 
 
+# scrypt is a slow, memory-hard hash, so a stolen password hash is expensive to
+# brute-force. The legacy SHA-256 fallback stays so people created before this
+# change can still log in; the login route upgrades them to scrypt afterwards.
+_SCRYPT_N = 16384
+_SCRYPT_R = 8
+_SCRYPT_P = 1
+_SALT_BYTES = 16
+_KEY_BYTES = 32
+
+
 def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+    salt = secrets.token_bytes(_SALT_BYTES)
+    key = hashlib.scrypt(
+        password.encode(), salt=salt, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P, dklen=_KEY_BYTES
+    )
+    return f"scrypt${_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${salt.hex()}${key.hex()}"
 
 
-def verify_password(password: str, hashed: str) -> bool:
-    return hash_password(password) == hashed
+def _verify_legacy(password: str, stored: str) -> bool:
+    if len(stored) != 64:
+        return False
+    try:
+        int(stored, 16)
+        return hmac.compare_digest(hashlib.sha256(password.encode()).hexdigest(), stored)
+    except (ValueError, TypeError):
+        return False
+
+
+def verify_password(password: str, stored: str) -> bool:
+    if not isinstance(stored, str):
+        return False
+    if not stored.startswith("scrypt$"):
+        return _verify_legacy(password, stored)
+    try:
+        _, n, r, p, salt_hex, hash_hex = stored.split("$")
+        key = hashlib.scrypt(
+            password.encode(),
+            salt=bytes.fromhex(salt_hex),
+            n=int(n),
+            r=int(r),
+            p=int(p),
+            dklen=_KEY_BYTES,
+        )
+        return hmac.compare_digest(key.hex(), hash_hex)
+    except (ValueError, TypeError, OverflowError):
+        return False
+
+
+def needs_rehash(stored: str) -> bool:
+    """True for legacy SHA-256 hashes or scrypt hashes with old parameters."""
+    if not isinstance(stored, str) or not stored.startswith("scrypt$"):
+        return True
+    try:
+        _, n, r, p, _salt, _hash = stored.split("$")
+        return (int(n), int(r), int(p)) != (_SCRYPT_N, _SCRYPT_R, _SCRYPT_P)
+    except (ValueError, TypeError):
+        return True
 
 
 def make_token(user_id: int, org_id: int | None = None) -> str:
