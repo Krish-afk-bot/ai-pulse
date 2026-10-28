@@ -17,6 +17,18 @@ def test_junior_engineer_does_not_get_senior_questions():
     assert "eng-arch" not in got
 
 
+def test_mid_engineer_gets_mid_questions_but_not_senior_questions():
+    got = ids(questions_for("engineering", "mid"))
+    assert "eng-assistant" in got
+    assert "eng-review" in got
+    assert "eng-arch" not in got
+
+
+def test_senior_engineer_gets_senior_questions():
+    got = ids(questions_for("engineering", "senior"))
+    assert "eng-arch" in got
+
+
 def test_senior_support_gets_escalation_question():
     assert "sup-escalation" in ids(questions_for("support", "senior"))
 
