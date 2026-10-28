@@ -56,3 +56,9 @@ python -m pytest
 `AI_MODE=mock` (default) returns canned model responses from `backend/data/mock_ai_responses.json`. Like a real model, they are not always well-formed.
 
 `AI_MODE=live` calls `LLM_API_URL` with `LLM_API_KEY` and `LLM_MODEL`.
+
+## Assessment privacy and deletion
+
+A diagnostic counts as complete for dashboard privacy only when the selected organization membership has exactly one valid response for every question assigned to that membership's job role and seniority. Responses with duplicate or unassigned question IDs, missing/blank answers, invalid multiple-choice answers, scores outside 1–5, or invalid risk labels do not count as a completed diagnostic. Department results are omitted until five distinct users have completed a valid diagnostic. Organization risk summaries include only released departments and only flags seen for at least five distinct employees.
+
+Employees can delete their assessment responses from the personal report using **Delete my assessment data**. `DELETE /reports/me` is authorized by the signed-in membership and deletes that membership's responses in the currently selected organization; it does not accept a user or membership ID. The client request does not clarify whether deletion should cover every organization attached to a multi-organization account. The implementation deliberately limits deletion to the selected organization pending client confirmation.

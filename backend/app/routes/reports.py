@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -31,3 +31,21 @@ def my_report(m: models.Membership = Depends(current_membership), db: Session = 
         "risks": flags,
         "next_steps": NEXT_STEPS.get(m.job_role, NEXT_STEPS["manager"]),
     }
+
+
+@router.delete("/me")
+def delete_my_responses(m: models.Membership = Depends(current_membership), db: Session = Depends(get_db)):
+    """Delete this user's assessment responses from the selected organization only."""
+    if m.role != "employee":
+        raise HTTPException(403, "Employees only")
+    try:
+        deleted = (
+            db.query(models.Response)
+            .filter_by(membership_id=m.id)
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(500, "Unable to delete assessment responses")
+    return {"deleted": deleted}
