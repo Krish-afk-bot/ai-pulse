@@ -3,6 +3,9 @@ import pytest
 
 os.environ["DATABASE_URL"] = "sqlite:///./test.db"
 os.environ["AI_MODE"] = "mock"
+# A cheap scrypt cost keeps hashing the seeded users fast; the cost is stored in
+# each hash, so verification and rehash checks still work normally.
+os.environ["SCRYPT_N"] = "1024"
 # Fixed test secret so tests never depend on a developer's local .env (and can
 # prove that the old committed secret no longer signs valid tokens).
 os.environ["SECRET_KEY"] = "test-secret-ai-pulse"

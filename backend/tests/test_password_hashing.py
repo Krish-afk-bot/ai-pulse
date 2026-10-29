@@ -1,5 +1,7 @@
 import hashlib
+import secrets
 
+from app import auth
 from app.auth import hash_password, verify_password, needs_rehash
 from app.db import SessionLocal
 from app import models
@@ -54,6 +56,22 @@ def test_legacy_sha256_hash_still_verifies():
 def test_scrypt_hash_with_old_parameters_needs_rehash():
     old = "scrypt$8192$8$1$" + "aa" * 16 + "$" + "bb" * 32
     assert needs_rehash(old) is True
+
+
+def test_lower_cost_hash_still_verifies_and_is_flagged_for_upgrade(monkeypatch):
+    # A hash built with the cheap cost the tests use (N=1024).
+    salt = secrets.token_bytes(16)
+    key = hashlib.scrypt(b"pulse123", salt=salt, n=1024, r=8, p=1, dklen=32)
+    stored = f"scrypt$1024$8$1${salt.hex()}${key.hex()}"
+
+    # The cost is stored inside the hash, so verification does not need the
+    # configured cost to match.
+    assert verify_password("pulse123", stored) is True
+    assert verify_password("wrong", stored) is False
+
+    # With the production cost configured, that hash is due an upgrade.
+    monkeypatch.setattr(auth, "_SCRYPT_N", 16384)
+    assert needs_rehash(stored) is True
 
 
 def test_malformed_stored_values_return_false():

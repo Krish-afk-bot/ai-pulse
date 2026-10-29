@@ -1,0 +1,6 @@
+# Store every text file with LF line endings, whatever the working tree uses.
+* text=auto eol=lf
+
+# Images are never treated as text.
+*.png binary
+*.jpg binary

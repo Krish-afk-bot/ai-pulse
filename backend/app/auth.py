@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -15,7 +16,8 @@ from . import models
 # scrypt is a slow, memory-hard hash, so a stolen password hash is expensive to
 # brute-force. The legacy SHA-256 fallback stays so people created before this
 # change can still log in; the login route upgrades them to scrypt afterwards.
-_SCRYPT_N = 16384
+# N is the cost: tests lower SCRYPT_N to hash seeded users quickly.
+_SCRYPT_N = int(os.getenv("SCRYPT_N", "16384"))
 _SCRYPT_R = 8
 _SCRYPT_P = 1
 _SALT_BYTES = 16
