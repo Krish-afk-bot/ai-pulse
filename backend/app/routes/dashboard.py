@@ -5,24 +5,13 @@ from ..db import get_db
 from .. import models
 from ..auth import current_membership
 from ..services.assessment import completed_responses
+from ..utils import maturity_level
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 # A department (or the pooled "Other teams" row) is only shown once at least this
 # many distinct people have a complete assessment, so nobody can be identified.
 MIN_GROUP_SIZE = 5
-
-
-def level_for(avg):
-    if avg is None:
-        return "Not assessed"
-    if avg < 1.5:
-        return "Beginner"
-    if avg < 2.5:
-        return "Exploring"
-    if avg < 3.5:
-        return "Practitioner"
-    return "Leader"
 
 
 def _row(name, employees, completed, is_group):
@@ -34,7 +23,7 @@ def _row(name, employees, completed, is_group):
         "employees": employees,
         "responded": len(completed),
         "average_score": round(average, 2) if average is not None else None,
-        "level": level_for(average),
+        "level": maturity_level(average),
         "is_group": is_group,
     }
 

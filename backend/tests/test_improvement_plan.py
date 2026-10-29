@@ -219,3 +219,65 @@ def test_one_employee_cannot_retrieve_another_employees_plan(client):
     response = client.get(f"/reports/me/improvement?user_id={priya_id}", headers=vikram_headers)
     assert response.status_code == 200
     assert {area["answer"] for area in response.json()["areas"]} == vikram_answers
+
+
+def _add_custom_assessment(db, membership, mcq_answers, open_score=5):
+    """Valid assessment: given MCQ answers, every other MCQ at its top option."""
+    for question in questions_for(membership.job_role, membership.seniority):
+        if question["type"] == "open":
+            answer, score = "Used AI and reviewed the output.", open_score
+        else:
+            text = mcq_answers.get(question["id"], question["options"][-1]["text"])
+            option = next(item for item in question["options"] if item["text"] == text)
+            answer, score = option["text"], option["points"]
+        db.add(models.Response(
+            membership_id=membership.id,
+            question_id=question["id"],
+            answer=answer,
+            score=score,
+            reason="Stored rationale." if question["type"] == "open" else None,
+            flags=[],
+        ))
+
+
+def _custom_plan(client, mcq_answers):
+    headers, _ = login(client, "priya@northwind.test", "Northwind Logistics")
+    db = SessionLocal()
+    try:
+        member = _membership("priya@northwind.test")
+        _clear_responses(db, member)
+        _add_custom_assessment(db, member, mcq_answers)
+        db.commit()
+    finally:
+        db.close()
+    return _plan(client, headers)
+
+
+def _by_question(plan, question_id):
+    return next(r for r in plan["recommendations"] if r["evidence"].get("question_id") == question_id)
+
+
+def test_mcq_gap_recommends_the_next_level_not_the_top_option(client):
+    plan = _custom_plan(client, {"common-freq": "A few times a month"})
+
+    frequency = _by_question(plan, "common-freq")
+    assert "A few times a week" in frequency["action"]
+    assert "Many times a day" not in frequency["action"]
+
+
+def test_low_review_gap_ranks_above_low_frequency_gap(client):
+    plan = _custom_plan(client, {"common-review": "Use it as is", "common-freq": "Never"})
+
+    ids = [r["evidence"].get("question_id") for r in plan["recommendations"]]
+    assert ids.index("common-review") < ids.index("common-freq")
+
+
+def test_policy_gap_asks_the_person_to_read_the_policy(client):
+    plan = _custom_plan(client, {"common-policy": "I think so, but I haven't read it"})
+
+    policy = _by_question(plan, "common-policy")
+    assert "AI policy" in policy["action"]
+    assert "manager" in policy["action"]
+    # At this level the answer is to read the policy, not to name the top option.
+    assert "Yes, and I help others follow it" not in policy["action"]
+

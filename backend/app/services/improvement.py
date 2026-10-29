@@ -58,6 +58,10 @@ RISK_ACTIONS = {
     "policy_unaware": "Read the company AI policy and confirm which tools are approved.",
 }
 
+# Data handling, output review and policy gaps matter more than raw usage
+# frequency, so these questions are sequenced before everything else.
+PRIORITY_QUESTIONS = ("common-review", "common-data", "common-policy")
+
 NOTE = (
     "Answers, scores, stored rationales and risk flags are saved assessment "
     "evidence. Next steps and explanations are generated from that evidence."
@@ -145,6 +149,12 @@ def _evidence(question, row, flags):
     }
 
 
+def _next_level(question, score):
+    """The option one level above the saved answer, or the top option when at the top."""
+    target = next((option for option in question["options"] if option["points"] == score + 1), None)
+    return target or max(question["options"], key=lambda option: option["points"])
+
+
 def _area_recommendation(question, row):
     """One evidence-linked action for a below-threshold question, or None."""
     flags = list(row.flags or [])
@@ -160,20 +170,32 @@ def _area_recommendation(question, row):
                     "so this follow-up targets that risk.".format(question["text"], flags[0])
                 ),
             }
+    if question["id"] == "common-policy" and row.score <= 2:
+        # Someone who has not read the policy needs to read it, not to copy the
+        # top answer, so this case names no option.
+        return {
+            "action": "Read the company's AI policy, then ask your manager which tools and data are approved.",
+            "source": "question_metadata",
+            "evidence": _evidence(question, row, flags),
+            "explanation": (
+                "Your saved answer for \u201c{0}\u201d scored {1}/5, so the next step is to read "
+                "the policy and confirm approved tools and data with your manager.".format(
+                    question["text"], row.score
+                )
+            ),
+        }
     if question["type"] == "mcq":
-        top = max(question["options"], key=lambda option: option["points"])
-        if top["points"] > row.score:
+        target = _next_level(question, row.score)
+        if target["points"] > row.score:
             return {
                 "action": "Work toward \u201c{0}\u201d for \u201c{1}\u201d.".format(
-                    top["text"], question["text"]
+                    target["text"], question["text"]
                 ),
                 "source": "question_metadata",
                 "evidence": _evidence(question, row, flags),
                 "explanation": (
-                    "Your saved answer \u201c{0}\u201d scored {1}/5, while this "
-                    "question's top level is \u201c{2}\u201d.".format(
-                        row.answer, row.score, top["text"]
-                    )
+                    "Your saved answer \u201c{0}\u201d scored {1}/5; the next level up is "
+                    "\u201c{2}\u201d.".format(row.answer, row.score, target["text"])
                 ),
             }
     return None
@@ -196,11 +218,22 @@ def _role_recommendation(membership, action):
     }
 
 
+def _rank_key(pair):
+    """Risk flags first, then data/review/policy questions, then the rest;
+    within each group the lowest score comes first."""
+    question, row = pair
+    if row.flags:
+        group = 0
+    elif question["id"] in PRIORITY_QUESTIONS:
+        group = 1
+    else:
+        group = 2
+    return (group, row.score)
+
+
 def _recommendations(membership, pairs):
     recommendations = []
-    # Risk flags take priority, then the lowest scores.
-    ranked = sorted(pairs, key=lambda pair: (0 if pair[1].flags else 1, pair[1].score))
-    for question, row in ranked:
+    for question, row in sorted(pairs, key=_rank_key):
         if len(recommendations) >= MAX_RECOMMENDATIONS:
             break
         if row.score >= GAP_THRESHOLD:

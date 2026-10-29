@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Integer, ForeignKey, DateTime, Text, Float, JSON
+from sqlalchemy import String, Integer, ForeignKey, DateTime, Text, Float, JSON, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
@@ -45,6 +45,9 @@ class Membership(Base):
 
 class Response(Base):
     __tablename__ = "responses"
+    # One answer per membership and question. create_all() does not alter existing
+    # tables, so an existing database needs a reseed to pick this constraint up.
+    __table_args__ = (UniqueConstraint("membership_id", "question_id", name="uq_response_membership_question"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     membership_id: Mapped[int] = mapped_column(ForeignKey("memberships.id"))
     question_id: Mapped[str] = mapped_column(String(40))

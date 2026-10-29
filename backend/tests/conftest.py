@@ -14,7 +14,9 @@ from app import seed  # noqa: E402
 
 @pytest.fixture()
 def client():
-    seed.run()
+    # Tests start from a clean seed (no complete assessments); the demo
+    # assessments in seed.run() are added only by test_seed_demo.py.
+    seed.run(with_demo=False)
     return TestClient(app)
 
 

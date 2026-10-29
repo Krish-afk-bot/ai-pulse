@@ -122,9 +122,11 @@ def test_pooled_risk_flag_needs_five_distinct_users(client):
     admin_headers, _ = login(client, "asha@northwind.test", "Northwind Logistics")
     db = SessionLocal()
     try:
-        pooled = _small_departments(db, {"Support": 3, "Engineering": 3}, [])
+        members = []
+        for name, count in {"Support": 3, "Engineering": 3}.items():
+            members.extend(_roster(db, name, count))
         # Four users share customer_data_shared, five share policy_unaware.
-        for index, member in enumerate(pooled):
+        for index, member in enumerate(members):
             flags = []
             if index < 4:
                 flags.append("customer_data_shared")

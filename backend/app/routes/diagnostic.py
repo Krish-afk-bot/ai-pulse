@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -91,6 +92,11 @@ def submit(body: SubmitIn, m: models.Membership = Depends(current_membership), d
     try:
         db.add_all(responses)
         db.commit()
+    except IntegrityError:
+        # A duplicate (membership_id, question_id) row already exists, e.g. a
+        # double-click raced past the duplicate check above.
+        db.rollback()
+        raise HTTPException(409, "These answers were already saved. Refresh and try again.")
     except Exception:
         db.rollback()
         raise HTTPException(500, "Unable to save assessment responses")

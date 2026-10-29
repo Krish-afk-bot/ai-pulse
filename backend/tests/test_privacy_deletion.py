@@ -97,7 +97,7 @@ def test_four_completed_employees_are_suppressed(client):
     assert data["top_risks"] == []
 
 
-def test_incomplete_and_duplicate_answers_do_not_count_as_completed(client):
+def test_incomplete_answers_do_not_count_as_completed(client):
     admin_headers, _ = login(client, "asha@northwind.test", "Northwind Logistics")
     db = SessionLocal()
     try:
@@ -106,9 +106,7 @@ def test_incomplete_and_duplicate_answers_do_not_count_as_completed(client):
             _add_complete_assessment(db, member, ["customer_data_shared"])
         incomplete = roster[3]
         first_question = questions_for(incomplete.job_role, incomplete.seniority)[0]
-        db.add(models.Response(membership_id=incomplete.id, question_id=first_question["id"],
-                               answer=first_question["options"][0]["text"], score=1,
-                               flags=["customer_data_shared"]))
+        # One single answer is not a complete assessment.
         db.add(models.Response(membership_id=incomplete.id, question_id=first_question["id"],
                                answer=first_question["options"][0]["text"], score=1,
                                flags=["customer_data_shared"]))
@@ -117,7 +115,7 @@ def test_incomplete_and_duplicate_answers_do_not_count_as_completed(client):
         db.query(models.Response).filter_by(membership_id=support_member.id).delete(synchronize_session=False)
         _add_complete_assessment(db, support_member, ["policy_unaware"])
         db.commit()
-        # Three complete + one duplicate/partial + one complete = four, not five.
+        # Three complete + one partial + one complete = four, not five.
     finally:
         db.close()
     data = _department_result(client, admin_headers)
