@@ -115,7 +115,16 @@ One weakness, honestly: the ranking and the wording were too generic. Every gap 
 
 ## 4. How I used AI tools
 
-TODO: I will write this section myself. It should say what I used an AI assistant for, what I checked by hand, and one real mistake it made.
+I used AI as a pair programmer and a reviewer, and kept the decisions and the verification myself.
+
+- **Trae (AI coding agent):** implemented the fixes in small tasks, one at a time, with tests run after each.
+- **Claude (chat):** acted as an independent reviewer. It probed my repository, listed suspected problems, and I only kept a finding when I could reproduce it. It also checked this README against the code and caught stale claims.
+- **My decisions:** what to fix and what to leave (section 1), hiding small teams behind an "Other teams" pool, scoping delete to one organization, and which feature to build.
+- **My verification:** I ran the tests and the build myself, compared against the original commit `5e3713c`, and removed any claim I could not back with code or command output.
+
+**One place the AI got it wrong.** The first version of the model-output validation in `services/scoring.py` was too strict. It rejected the whole answer for a code-fenced JSON reply, an unknown risk flag, or a missing reason, so ordinary submissions failed with a 502. In mock mode the response depends only on the text, so the same answer failed every time, and the UI showed no error. The code and the AI-written tests both looked fine. A review pass that submitted 40 different answers exposed it: the strict version rejected 17 and the final version rejects 7, the genuinely invalid outputs (a score of 7 and `"four"`). The fix extracts the first JSON object, accepts only a whole-number 1-5 score, drops unknown flags, defaults a missing reason, and retries once. Each canned output has a test.
+
+A second, smaller miss is in section 3: the first improvement-plan wording was generic and aimed every gap at the top option. I changed the ranking and added tests.
 
 ## Tests and CI
 
