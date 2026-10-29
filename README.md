@@ -1,162 +1,134 @@
 # AI Pulse
 
-AI Pulse helps a company see how well its people use AI at work, team by team,
-without exposing individuals. Employees take a short diagnostic that adapts to
-their role and seniority. Leadership sees team results under a privacy rule.
+AI Pulse shows how well a company's teams use AI at work without exposing individuals. Employees take a short diagnostic that adapts to their role and seniority; leadership sees only aggregate, privacy-safe results.
 
-**Walkthrough video:** [ADD LINK BEFORE SUBMITTING]
+[![CI](https://github.com/Krish-afk-bot/ai-pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/Krish-afk-bot/ai-pulse/actions/workflows/ci.yml)
 
-## Quick start
+## Run it
 
-Backend (Python 3.12 or 3.13):
+PowerShell, one command per line, no `&&`. Backend first:
 
-```bash
+```powershell
 cd backend
 python -m venv .venv
-# Windows: .venv\Scripts\activate    Mac/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env        # then put a random value in SECRET_KEY
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
+Copy-Item .env.example .env
 python -c "import secrets; print(secrets.token_hex(32))"
-python -m app.seed          # demo data. Drops all tables. Password for every user: pulse123
+python -m app.seed
 uvicorn app.main:app --reload
 ```
 
-Frontend (second terminal):
+Put the printed value in `SECRET_KEY` in `backend/.env` before starting. `app.seed` drops and recreates the tables. The backend runs on http://localhost:8000.
 
-```bash
+Frontend, in a second terminal:
+
+```powershell
 cd frontend
 npm install
-npm run dev                 # http://localhost:5173
+npm run dev
 ```
 
-Tests: `cd backend && python -m pytest -q` (69 passed) and `cd frontend && npm run build`.
+Frontend on http://localhost:5173. Tests:
 
-## Demo accounts (password `pulse123`)
+```powershell
+cd backend
+python -m pytest -q -W ignore
+```
+
+Demo accounts, all with password `pulse123`:
 
 | Account | What to look at |
 |---|---|
-| asha@northwind.test | Northwind admin. Dashboard is empty by design: every seeded team is under 5 completed diagnostics. |
-| meera@bluepeak.test | Bluepeak admin. Same. |
-| ravi@consult.test | Both orgs: employee at Northwind, admin at Bluepeak. The token is scoped to the org you pick. |
-| priya@northwind.test | Support employee. Report, improvement plan, delete button. |
+| asha@northwind.test | Northwind admin. Dashboard table and top risks. |
+| meera@bluepeak.test | Bluepeak admin. Only two completed diagnostics, so nothing is released. |
+| ravi@consult.test | Employee at Northwind, admin at Bluepeak. Same password, two roles. |
+| priya@northwind.test | Support junior. Starts with two partial answers, so she can finish live. |
 | dev@northwind.test | Engineering lead. Gets the senior engineering questions. |
 
-## In three minutes
+`AI_MODE` defaults to `mock`, which picks a canned response by hashing the answer text, so scoring is deterministic. The app logs a warning at startup in that mode, because it must not be used for a real assessment. `live` calls an OpenAI-compatible endpoint and needs `LLM_API_URL`, `LLM_API_KEY` and `LLM_MODEL`; without them the app refuses to start rather than fail on the first answer.
 
-- **Found:** the dashboard trusted `?org_id`; a secret was committed and let anyone forge a login; the dashboard average was wrong; leads lost senior questions; bad AI output crashed or polluted data.
-- **Fixed:** tenant isolation, secret untracked, scoring validation that is strict but tolerant, seniority ranking, error handling, plus the two client requests.
-- **Deliberately left:** password hashing, CORS, dashboard UI, live-model testing (see below).
-- **Client request:** teams under 5 completed diagnostics are hidden; employees can delete their own answers per organization.
-- **Own feature:** an evidence-backed improvement plan on the employee report.
-- **Tests:** original commit `5e3713c`: 1 failed, 7 passed. Now: 69 passed.
+If you reseed, the rows are recreated with new ids, so a token left in `localStorage` can point at a different person. Run `localStorage.clear()` in the browser console and sign in again. The same happens after every backend restart when `SECRET_KEY` is unset, because a new random key is generated each time.
 
-## What I found
+## 1. What I found, fixed, and left
 
-All reproduced on the original code (commit `5e3713c`).
+The first column describes the original code, which I compared against commit `5e3713c`.
 
-**Tenant isolation and auth**
-- `routes/dashboard.py:24` trusted `?org_id`. A Bluepeak admin read Northwind's departments and risks.
-- `routes/auth_routes.py:33` issued a token for any `org_id` without checking membership.
-- `backend/.env` was tracked with `SECRET_KEY=pulse-7f3a9c2e1b-prod`. A token signed with it, without any login, returned the Northwind admin dashboard (HTTP 200). **The key is still in git history and must be rotated.**
-- `tests/test_api.py::test_admin_cannot_see_other_org` called the admin's own org and asserted 200. The leak was green.
+| Problem | Status | Notes |
+|---|---|---|
+| Dashboard read `?org_id` from the query string | Fixed | An admin of one org could read another org's departments and risks. `routes/dashboard.py` now returns 403 unless the caller is an admin of the org in their token. `test_admin_cannot_see_other_org`, `test_dashboard_cross_tenant_access_still_denied`. |
+| `select-org` issued a token for any org id | Fixed | `routes/auth_routes.py` checks for a real membership first. `test_auth_select_org.py`. |
+| `backend/.env` was tracked, with `SECRET_KEY=pulse-7f3a9c2e1b-prod` | Left | The key is dead: `config.py` has no hard-coded fallback and signs with a fresh random key when `SECRET_KEY` is unset, and `test_auth_secret.py` proves the old key can no longer sign a valid token. It is still in git history and must be rotated. TODO: verify that `.env` is no longer tracked, with `git ls-files backend/.env`. |
+| Passwords hashed with plain, unsalted SHA-256 | Fixed | `auth.py` uses `hashlib.scrypt` (N=16384, r=8, p=1, 16-byte salt), stores the parameters inside the hash, and upgrades a legacy hash on the next successful login. `test_password_hashing.py`. |
+| Seniority compared as strings, so `"lead" < "mid"` | Fixed | Leads silently lost the senior questions. `services/questions.py` now uses `SENIORITY_RANK`. `test_questions.py`. |
+| Model output parsed with a bare `json.loads` and stored unchecked | Fixed | `services/scoring.py` extracts the first JSON object, requires a whole number 1-5, drops unknown flags, defaults a missing reason, retries once, then raises `ScoringError` (502, nothing saved). `test_scoring_validation.py`. |
+| The answer travelled in the same message as the scoring rules | Reduced, not solved | `services/llm.py` sends the rules as a `system` message and the answer alone inside `<employee_answer>`, strips those tags out of the answer, and sets `temperature: 0`. A model that ignores its instructions can still be misled. |
+| `AI_MODE` defaults to `mock`, so a deployment that forgets to set it silently scores everyone with canned answers | Left | The default stands. `config.py` now rejects any other value and requires the three LLM variables in live mode, and `main.py` warns at startup. |
+| A double submit created duplicate rows for the same question | Fixed | Duplicates made `completed_responses` reject that person forever. There is now a `UniqueConstraint("membership_id", "question_id")` on `Response` and the submit route returns 409 on `IntegrityError`. `test_response_uniqueness.py`. |
+| Two maturity bandings (`1.5/2.5/3.5` on the dashboard, `2/3/4` on the report) | Fixed | `utils.maturity_level` is the only one; `dashboard.py` imports it. `test_maturity_bands.py`. |
+| Admin dashboard rendered raw JSON | Fixed | `frontend/src/pages/Dashboard.jsx` is a table with a caption and `th scope="col"`, a plain-English top-risks list, and an empty state that does not reveal how many people finished. |
+| No CI | Fixed | `.github/workflows/ci.yml` runs the backend tests and the frontend build on push and pull request to `main`. |
+| Department average divided by headcount, not by responses | Fixed | `routes/dashboard.py` averages each person's own average, then averages those, and only over people with a complete assessment. |
+| Dockerfile started `main:app`, which does not exist | Fixed | It starts `app.main:app`. TODO: verify by building the image; Docker was not available here. |
 
-**Numbers and questions**
-- `routes/dashboard.py:48` divided by headcount, not responses. Sales showed 2.67 when its only respondent scored 4.0. Empty teams showed `0.0 / Beginner`.
-- The dashboard and the report used different maturity bands (1.5/2.5/3.5 vs 2/3/4).
-- `services/questions.py:18` compared seniority as strings, so `"lead" < "mid"`. Leads lost the senior questions. This was the one failing baseline test.
+Left on purpose:
 
-**AI output**
-- `services/scoring.py:8-9` ran `json.loads` unguarded and stored the result unchecked. Of the 10 canned model outputs, one crashed the request, and others carried a score of 7, `"four"`, a missing reason, or an invented flag `probably_lying`.
-- After my first, strict fix, about half of normal answers were rejected with 502. Measured: 21 of 40 answers in mock mode. The same text failed every time, and the UI showed no message.
-
-**Other**
-- Submitting twice stored duplicate answers (6 questions gave 14 stored answers).
-- `backend/Dockerfile` started `main:app`, which does not exist.
-- `frontend/src/pages/Diagnostic.jsx` showed no error when a request failed.
-
-## What I fixed
-
-| Fix | Where / tests |
+| Left | Why |
 |---|---|
-| Dashboard uses the org from the token; a different `org_id` gets 403 | `test_admin_cannot_see_other_org`, `test_employee_cannot_access_admin_dashboard`, `test_dashboard_cross_tenant_access_still_denied` |
-| `select-org` requires a membership | `tests/test_auth_select_org.py` |
-| Secret untracked; no hard-coded fallback; old key rejected | `tests/test_auth_secret.py` |
-| Average computed per person, not per headcount | `routes/dashboard.py` |
-| Seniority ranking | `test_lead_manager_gets_policy_questions` and the other tests in `test_questions.py` |
-| Model output: first JSON object extracted, whole number 1-5 only (never clamped), unknown flags dropped, default reason, one retry, then `ScoringError` (502, nothing saved) | `tests/test_scoring_validation.py`, one case per fixture in `data/mock_ai_responses.json` |
-| Small groups hidden; flags from hidden teams excluded | `tests/test_privacy_deletion.py` |
-| Delete my answers, per organization, immediate effect | `tests/test_privacy_deletion.py` |
-| Duplicate and unassigned answers do not count as completed | `completed_responses` in `services/assessment.py` |
-| Frontend error states; `api.js` no longer crashes on non-JSON errors | manual browser check |
-| Dockerfile entrypoint `app.main:app` | not built (Docker not available) |
+| CORS `allow_origins=["*"]` in `main.py` | Fine for a local demo, wrong for anything public. |
+| Token in `localStorage` (`frontend/src/api.js`) | Simple, but any script on the page can read it. An httpOnly cookie is the real fix. |
+| No migrations | `create_all` runs at startup and never alters an existing table, so the new unique constraint needs a reseed. Alembic is the answer. |
+| No login rate limiting, no password reset, no signup | Out of scope for a pilot, and all three are needed before real use. |
+| Delete is scoped to one organization | The client has not said what a multi-org user like Ravi should get. |
+| "Other teams" numbers move when someone deletes data | Pooling is recomputed on every request, so one deletion can push a team back under the threshold and change the pooled row. Correct for privacy, awkward to explain. |
+| N+1 queries in the dashboard | One query per member per request. Fine at seed size, not at a few thousand people. |
+| Live mode tested only against a mocked endpoint | `test_llm_live.py` patches `httpx.post`. No real provider has ever been called. |
 
-Tests I changed: `test_admin_cannot_see_other_org` now asserts 403 instead of 200.
+Honestly still weak: the injection defence is a delimiter and a sentence, not a guarantee. The old secret sits in history. There are no migrations. Nothing here has run against a real model.
 
-## What I deliberately left, and why
+## 2. The client request
 
-- **SHA-256 password hashing** (`auth.py`). Real fix: a salted, slow hash. Not done in the time available.
-- **CORS `*`** (`main.py`). Acceptable for local demos, not for production.
-- **Admin dashboard UI** is a raw JSON view (`Dashboard.jsx`). The backend rules are tested.
-- **Live model mode is untested.** Everything runs in mock mode.
-- **Prompt injection is not fully handled.** A user can still try to steer the score of their open answer.
-- **No login throttling, no password reset, no account creation.**
-- **Two maturity functions** may still exist in the code (`utils.py` and `dashboard.py`). [CONFIRM IN CODE BEFORE KEEPING THIS LINE]
-- **Old secret is still in git history.** Rotate it.
+**No small groups.** `GET /dashboard?org_id=...` releases a department only when at least `MIN_GROUP_SIZE` (5) distinct people in it have a complete, valid diagnostic. Below that the department is pooled into a single "Other teams" row, and that row is shown only if the pool itself reaches five; otherwise nothing is returned at all, not even a count. `top_risks` counts flags only from released rows, and a flag needs five distinct people. Validity comes from `completed_responses` in `services/assessment.py`, which rejects partial, duplicate or unassigned answers. Covered by `test_privacy_deletion.py`, `test_other_teams.py` and `test_seed_demo.py`.
 
-## The client request
+**Right to delete.** `DELETE /reports/me` removes the signed-in employee's answers for the organization in their token and returns how many rows went. It takes no user id, so it can only ever delete your own data, and admins get 403. The dashboard reads the database on every request, so the change is visible immediately. Covered by `test_privacy_deletion.py`.
 
-**1. No small groups.** A department is returned only when at least 5 distinct people have a complete, valid diagnostic. Below that, the department is skipped entirely: no name, score or risk. `top_risks` counts only released departments, and a flag must be seen for at least 5 different people. Completeness comes from `completed_responses` (`services/assessment.py`).
+Questions I would put to Northwind:
 
-**2. Right to delete.** `DELETE /reports/me` removes the signed-in employee's answers in the selected organization. It takes no user id, so nobody can delete another person's data. The dashboard re-reads data on every request, so the change shows immediately. Admins get 403.
+1. Should delete cover every organization for a user like Ravi, or only the one they are signed into?
+2. Can an admin who also takes the diagnostic delete their own answers? Right now they get 403.
+3. Does "delete" reach backups too, and what is the retention period?
+4. Is sending free-text answers to an external LLM acceptable, and if so which provider and which region?
+5. Is five the right threshold for every team, including the small ones where it hides real risk?
+6. Do you want an audit log of deletions, and who should be able to read it?
 
-## Questions for Northwind HR
+## 3. My own feature: the evidence-backed improvement plan
 
-1. Delete: only the selected organization, or all organizations for a consultant like Ravi?
-2. Hard delete, or soft delete for audit?
-3. Does "completed" mean the whole question set (what I built)?
-4. Hide small teams (what I built) or group them as "Other teams"?
-5. Is it acceptable that a risk only appears when 5 or more people share it? This hides real risks in small companies.
-6. Can admins or HR delete data on someone's behalf (for example a leaver)?
-7. Where else does the data live: backups, and the LLM provider in live mode (free text goes to a third party)?
+`GET /reports/me/improvement` (`routes/reports.py`, `services/improvement.py`) returns, for the signed-in employee only: their saved answer, score, stored rationale and risk flags per question; the areas below 4/5; and two or three next actions, each naming the answer or flag it came from. `frontend/src/pages/Report.jsx` renders it below the report.
 
-## My feature: improvement plan
+The problem it solves: the report gave an average and a maturity label and stopped. It told someone they were a "Practitioner" without saying which answer cost them or what to do next. This answers "why this score" and "what now", using only data the assessment already stores. It marks clearly what is saved evidence and what is generated text.
 
-`GET /reports/me/improvement` returns, for the signed-in employee only: the saved answer, score and reason per question; the gaps (score below 4); and 2-3 recommended next actions, each tied to stored evidence. It never invents evidence: if there is no or partial data it returns `empty` or `incomplete`.
+Why this over other ideas: it needs no new model call, no new data and no new permission model, and it makes the privacy work visible instead of hidden behind an aggregate. I rejected a manager-facing scorecard because a per-person manager view would leak individual scores far more easily.
 
-**Problem:** the report gave a number and a level but no reason and no next step. **Why this one:** [YOUR REASON]. It reuses stored data, adds no model call, and cannot read another person's plan. Tests: `tests/test_improvement_plan.py`.
+What it does not do: it never calls an LLM, it keeps no history, and there is no manager view. It cannot show progress over time, because there is only ever one current assessment.
 
-## Can the AI parts be trusted?
+One weakness, honestly: the ranking and the wording were too generic. Every gap was treated the same, and every multiple-choice gap aimed at the top option, so "A few times a month" jumped straight to "Many times a day" and someone who had not read the policy was told to help others follow it. Ranking now puts risk flags first, then the data, review and policy questions, then everything else, lowest score first, and asks for one level up rather than the top. `test_improvement_plan.py` covers each of those.
 
-- **Output is validated** (`services/scoring.py`): the first JSON object is extracted, even from a code fence; the score must be a whole number 1-5; unknown flags are dropped; one retry; then 502 and nothing saved. All 10 mock fixtures are tested.
-- **In mock mode** (the default), the response is picked by hashing the answer, so it is deterministic. Of 40 different answers, [N] still failed (score 7 and `"four"` are the two invalid fixtures).
-- **Limits:** live mode is untested, and the prompt is not hardened against injection.
+## 4. How I used AI tools
 
-## How to change it safely
+TODO: I will write this section myself. It should say what I used an AI assistant for, what I checked by hand, and one real mistake it made.
 
-| What | Where |
-|---|---|
-| Questions | `backend/data/questions.json`, tests in `tests/test_questions.py` |
-| Privacy threshold | the `5` in `routes/dashboard.py` |
-| Scoring | `services/scoring.py`, `services/llm.py` |
-| Auth | `auth.py`, `routes/auth_routes.py` |
-| UI | `frontend/src/pages/` |
+## Tests and CI
 
-Run one test: `cd backend && python -m pytest tests/test_privacy_deletion.py -q`
+The backend suite covers tenant authorization, the select-org membership check, the old secret being rejected, seniority filtering, scoring validation and retries, every mock fixture, password hashing and the legacy upgrade, the privacy threshold, pooling, deletion and its effect on the dashboard, the unique constraint, the single maturity banding, the improvement plan, and the live scoring path with a mocked HTTP call.
 
-## Verification
+What it does not cover: no real LLM call, no browser tests, no Docker build, no concurrency or load test. The frontend has no automated tests at all; `npm run build` only proves it compiles. The seeded numbers are checked by `test_seed_demo.py`, but nothing checks that the demo still looks right by eye.
 
-- Backend: **69 passed**. Original commit: 1 failed, 7 passed.
-- Frontend: `npm run build` succeeds.
-- **Not run:** Docker image, live model, CI on GitHub.
+TODO: verify the current test count and runtime by running `cd backend` then `python -m pytest -q -W ignore` and pasting the output. TODO: verify that the CI workflow passes on GitHub; it has not been pushed yet.
 
-## How I used AI
+## What I would do next
 
-I used an AI coding assistant to read the code, draft fixes, write tests and draft this document. I ran the tests myself and checked claims against the code.
-
-**One place it was wrong:** its first ranking of improvement recommendations sorted by score only, so a flagged open answer could drop out of the plan. `test_risk_flag_produces_supported_recommendation` failed, and the ranking now puts flagged areas first (`_recommendations` in `services/improvement.py`). [KEEP ONLY IF THIS HAPPENED IN YOUR WORK]
-
-## Known limitations
-
-- Delete is per organization; the "all organizations" question is open.
-- Live model path and prompt injection: see above.
-- The old secret is in git history.
+1. Rotate the leaked secret and purge it from git history, then rotate anything else that ever lived in `.env`.
+2. Add Alembic, so a deployment does not need a reseed to pick up a new constraint.
+3. Fix the N+1 queries on the dashboard before it is pointed at a real company.
+4. Move the token out of `localStorage`, add login rate limiting, and add an audit log for deletions.
+5. Call a real model in staging with a cost and timeout budget, and re-test the prompt against injection.
